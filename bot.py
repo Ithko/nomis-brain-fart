@@ -12,12 +12,12 @@ from discord import app_commands
 logger = logging.getLogger("mybot")
 
 console_log = logging.StreamHandler()
-file_log = logging.FileHandler(filename="bot.log", encoding="utf-8", mode="w")
-file_log_format = logging.Formatter("[{asctime}] [{levelname:<8}] {name}: {message}", "%Y-%m-%d %H:%M:%S", style="{")
-file_log.setFormatter(file_log_format)
+#file_log = logging.FileHandler(filename="bot.log", encoding="utf-8", mode="w")
+#file_log_format = logging.Formatter("[{asctime}] [{levelname:<8}] {name}: {message}", "%Y-%m-%d %H:%M:%S", style="{")
+#file_log.setFormatter(file_log_format)
 
 logger.setLevel(logging.INFO)
-logger.addHandler(file_log)
+#logger.addHandler(file_log)
 logger.addHandler(console_log)
 
 intents = discord.Intents.all()
