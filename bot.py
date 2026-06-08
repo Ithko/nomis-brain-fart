@@ -296,7 +296,7 @@ async def recap_remove(context: discord.Interaction, recap_id: int):
         return
     await context.response.send_message(f"Successfully removed recap with id {recap_id}", ephemeral=True)
 
-@tree.command(
+@recap_group.command(
         name="list",
         description=f"Lists recaps from given user"
         )
