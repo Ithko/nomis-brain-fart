@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Optional
+from typing import Literal, Optional
 import mysql.connector
 import datetime
 import math
@@ -66,55 +66,55 @@ class Bot(discord.Client):
         game = discord.Game("with the API")
         await self.change_presence(status=discord.Status.online, activity=game)
 
-    # @tasks.loop(seconds=10)
-    # async def process_messages(self):
-    #     now = datetime.datetime.now()
-    #     if now.minute == 0:
-    #         if self.processed:
-    #             return
+    @tasks.loop(seconds=10)
+    async def process_messages(self):
+        now = datetime.datetime.now()
+        if now.minute == 0:
+            if self.processed:
+                return
 
-    #         if len(self.message_array) == 0:
-    #             self.processed = True;
-    #             return
+            if len(self.message_array) == 0:
+                self.processed = True;
+                return
 
-    #         channels_activity = dict()
-    #         user_activity = dict()
-    #         channel_user_activity = dict()
+            channel_activity = dict()
+            user_activity = dict()
+            channel_user_activity = dict()
 
-    #         for message in self.message_array:
-    #             channels_activity[(message["server_id"], message["channel_id"])][0]+=1
-    #             channels_activity[(message["server_id"], message["channel_id"])][1]+=len(message["content"])
+            for message in self.message_array:
+                channel_activity[(message["server_id"], message["channel_id"])][0]+=1
+                channel_activity[(message["server_id"], message["channel_id"])][1]+=len(message["content"])
 
-    #             user_activity[(message["server_id"], message["user_id"])][0]+=1
-    #             user_activity[(message["server_id"], message["user_id"])][1]+=len(message["content"])
+                user_activity[(message["server_id"], message["user_id"])][0]+=1
+                user_activity[(message["server_id"], message["user_id"])][1]+=len(message["content"])
 
-    #             channel_user_activity[(message["server_id"], message["channel_id"], message["user_id"])][0]+=1
-    #             channel_user_activity[(message["server_id"], message["channel_id"], message["user_id"])][1]+=len(message["content"])
+                channel_user_activity[(message["server_id"], message["channel_id"], message["user_id"])][0]+=1
+                channel_user_activity[(message["server_id"], message["channel_id"], message["user_id"])][1]+=len(message["content"])
 
-    #         channels_values = []
-    #         user_values = []
-    #         channel_user_values = []
+            channel_values = []
+            user_values = []
+            channel_user_values = []
 
-    #         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:00:00")
-    #         for key in channels_activity.keys():
-    #             channels_values.append((key[0], key[1], channels_activity[key][0], channels_activity[key][1], current_time))
+            current_time = (datetime.datetime.now() - datetime.timedelta(hours=1)).strftime("%Y-%m-%d")
+            for key in channel_activity.keys():
+                channel_values.append({"sid": key[0], "cid": key[1], "msg": channel_user_activity[key][0], "chr": channel_user_activity[key][1], "t": current_time})
 
-    #         for key in user_activity.keys():
-    #             user_values.append((key[0], key[1], channels_activity[key][0], channels_activity[key][1], current_time))
+            for key in user_activity.keys():
+                user_values.append({"sid": key[0], "uid": key[1], "msg": channel_user_activity[key][0], "chr": channel_user_activity[key][1], "t": current_time})
 
-    #         for key in channel_user_activity.keys():
-    #             channel_user_values.append((key[0], key[1], key[2], channels_activity[key][0], channels_activity[key][1], current_time))
+            for key in channel_user_activity.keys():
+                channel_user_values.append({"sid": key[0], "cid": key[1], "uid": key[2], "msg": channel_user_activity[key][0], "chr": channel_user_activity[key][1], "t": current_time})
 
-    #         db = self.db()
-    #         cursor = db.cursor();
-    #         cursor.executemany("INSERT INTO channel_activity VALUES (%s, %s, %s, %s, %s)", channels_values)
-    #         cursor.executemany("INSERT INTO user_activity VALUES (%s, %s, %s, %s, %s)", user_values)
-    #         cursor.executemany("INSERT INTO channel_user_activity VALUES (%s, %s, %s, %s, %s, %s)", channel_user_values)
-    #         cursor.close()
-    #         db.commit()
-    #         db.close()
-    #     else:
-    #         self.processed = False
+            db = self.db()
+            cursor = db.cursor();
+            cursor.executemany("INSERT INTO channel_activity VALUES (%(sid)s, %(cid)s, %(msg)s, %(chr)s, %(t)s) ON DUPLICATE KEY UPDATE messages = messages + %(msg)s, chars = chars + %(chr)s", channel_values)
+            cursor.executemany("INSERT INTO user_activity VALUES (%(sid)s, %(uid)s, %(msg)s, %(chr)s, %(t)s) ON DUPLICATE KEY UPDATE messages = messages + %(msg)s, chars = chars + %(chr)s", user_values)
+            cursor.executemany("INSERT INTO channel_activity VALUES (%(sid)s, %(cid)s, %(uid)s, %(msg)s, %(chr)s, %(t)s) ON DUPLICATE KEY UPDATE messages = messages + %(msg)s, chars = chars + %(chr)s", channel_user_values)
+            cursor.close()
+            db.commit()
+            db.close()
+        else:
+            self.processed = False
 
     async def on_member_join(self, member: discord.Member):
         logger.info(f'Member {member.name} joined with nick {member.nick} and id {member.id}!')
@@ -234,7 +234,7 @@ async def recap(context: discord.Interaction, date: Optional[str]):
 
 @recap_group.command(
         name="add",
-        description="Removes a given recap"
+        description="Adds a recap for given day"
         )
 @app_commands.describe(
         text="Recap's content",
@@ -258,7 +258,7 @@ async def recap_add(context: discord.Interaction, text: str, date: Optional[str]
     try:
         db = bot.db()
         cursor = db.cursor()
-        cursor.execute("INSERT INTO recaps(server_id, user_id, date, content) VALUE(%s, %s, %s, %s)", (context.guild_id, context.user.id, date_new.strftime('%Y-%m-%d'), text))
+        cursor.execute("INSERT INTO recaps(server_id, user_id, date, content) VALUES(%s, %s, %s, %s)", (context.guild_id, context.user.id, date_new.strftime('%Y-%m-%d'), text))
         cursor.close()
         db.commit()
         db.close()
@@ -328,7 +328,20 @@ async def recap_list(context: discord.Interaction, target: Optional[discord.Memb
 
 tree.add_command(recap_group)
 
-# activity_group = GuildGroup(name='activity', description='Activity analytics commands!')
+activity_group = GuildGroup(name='activity', description='Activity analytics commands!')
+
+@activity_group.command(
+        name="user",
+        description=f"Shows activity for given user"
+        )
+@app_commands.describe(
+        mode="Activity score mode",
+        scope="Activity scope",
+        target="Target user (self on empty)",
+        )
+@app_commands.guild_only()
+async def user_activity(context: discord.Interaction, mode: Literal["Messages", "Characters"], scope: Literal["Per channel", "Overall"], target: Optional[discord.Member]):
+    pass
 
 @tree.command(
         name="hi",
