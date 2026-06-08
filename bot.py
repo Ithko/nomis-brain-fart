@@ -27,16 +27,18 @@ logger.addHandler(console_log)
 intents = discord.Intents.all()
 
 class Bot(discord.Client):
-    def __init__(self, *, intents: Intents) -> None:
-        super().__init__(intents=intents)
-        self.db = mysql.connector.connect(
+    def db(self):
+        return mysql.connector.connect(
                 host = os.getenv("DB_HOST"),
                 user = os.getenv("DB_USER"),
                 password = os.getenv("DB_PASSWORD"),
                 database = os.getenv("DB_DATABASE"),
             )
-
-        cursor = self.db.cursor()
+    def __init__(self, *, intents: Intents) -> None:
+        super().__init__(intents=intents)
+        
+        db = self.db()
+        cursor = db.cursor()
         cursor.execute("SELECT * FROM server_options")
         options = cursor.fetchall()
 
@@ -56,10 +58,10 @@ class Bot(discord.Client):
                 self.server_options[guild.id] = [False,]
 
         cursor.close()
-        self.db.commit()
+        db.commit()
+        db.close()
 
     async def on_ready(self):
-        await tree.sync()
         logger.info(f'Logged on as {self.user}!')
         game = discord.Game("with the API")
         await self.change_presence(status=discord.Status.online, activity=game)
@@ -71,24 +73,46 @@ class Bot(discord.Client):
     #         if self.processed:
     #             return
 
+    #         if len(self.message_array) == 0:
+    #             self.processed = True;
+    #             return
+
     #         channels_activity = dict()
-    #         channels_activity_chars = dict()
-
     #         user_activity = dict()
-    #         user_activity_chars = dict()
-
     #         channel_user_activity = dict()
-    #         channel_user_activity_chars = dict()
 
     #         for message in self.message_array:
-    #             channels_activity[(message["server_id"], message["channel_id"])]+=1
-    #             channels_activity_chars[(message["server_id"], message["channel_id"])]+=len(message["content"])
+    #             channels_activity[(message["server_id"], message["channel_id"])][0]+=1
+    #             channels_activity[(message["server_id"], message["channel_id"])][1]+=len(message["content"])
 
-    #             user_activity[(message["server_id"], message["user_id"])]+=1
-    #             user_activity_chars[(message["server_id"], message["user_id"])]+=len(message["content"])
+    #             user_activity[(message["server_id"], message["user_id"])][0]+=1
+    #             user_activity[(message["server_id"], message["user_id"])][1]+=len(message["content"])
 
-    #             channel_user_activity[(message["server_id"], message["channel_id"], message["user_id"])]+=1
-    #             channel_user_activity_chars[(message["server_id"], message["channel_id"], message["user_id"])]+=len(message["content"])
+    #             channel_user_activity[(message["server_id"], message["channel_id"], message["user_id"])][0]+=1
+    #             channel_user_activity[(message["server_id"], message["channel_id"], message["user_id"])][1]+=len(message["content"])
+
+    #         channels_values = []
+    #         user_values = []
+    #         channel_user_values = []
+
+    #         current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:00:00")
+    #         for key in channels_activity.keys():
+    #             channels_values.append((key[0], key[1], channels_activity[key][0], channels_activity[key][1], current_time))
+
+    #         for key in user_activity.keys():
+    #             user_values.append((key[0], key[1], channels_activity[key][0], channels_activity[key][1], current_time))
+
+    #         for key in channel_user_activity.keys():
+    #             channel_user_values.append((key[0], key[1], key[2], channels_activity[key][0], channels_activity[key][1], current_time))
+
+    #         db = self.db()
+    #         cursor = db.cursor();
+    #         cursor.executemany("INSERT INTO channel_activity VALUES (%s, %s, %s, %s, %s)", channels_values)
+    #         cursor.executemany("INSERT INTO user_activity VALUES (%s, %s, %s, %s, %s)", user_values)
+    #         cursor.executemany("INSERT INTO channel_user_activity VALUES (%s, %s, %s, %s, %s, %s)", channel_user_values)
+    #         cursor.close()
+    #         db.commit()
+    #         db.close()
     #     else:
     #         self.processed = False
 
@@ -124,7 +148,6 @@ class Bot(discord.Client):
     #         # cursor.close()
 
 
-
 bot = Bot(intents=intents)
 tree = discord.app_commands.CommandTree(bot)
 owner_id = int(os.getenv("OWNER_ID"))
@@ -134,10 +157,12 @@ if owner_name is None:
     exit()
 
 async def get_recaps(date: datetime.date, server_id: int):
-    cursor = bot.db.cursor()
+    db = bot.db()
+    cursor = db.cursor()
     cursor.execute("SELECT user_id, content FROM recaps WHERE date = %s AND server_id = %s", (date, server_id))
     out = cursor.fetchall()
     cursor.close()
+    db.close()
     if out is None:
         return None
     recaps = []
@@ -147,10 +172,12 @@ async def get_recaps(date: datetime.date, server_id: int):
     return recaps
 
 async def get_recap_list(member_id, guild_id):
-    cursor = bot.db.cursor()
+    db = bot.db()
+    cursor = db.cursor()
     cursor.execute("SELECT id, date, content from recaps where user_id = %s and server_id = %s", (member_id, guild_id))
     out = cursor.fetchall()
     cursor.close()
+    db.close()
     if out is None:
         return None
     recaps = []
@@ -159,14 +186,19 @@ async def get_recap_list(member_id, guild_id):
         recaps.append(recap)
     return recaps
 
+@app_commands.guild_only()
+class GuildGroup(app_commands.Group):
+    pass
+recap_group = GuildGroup(name='recap', description='Recap commands!')
 
-@tree.command(
-        name="recap",
+@recap_group.command(
+        name="show",
         description="Prints a recap for given day"
         )
 @app_commands.describe(
         date="Recap's date in YYYY-MM-DD format"
         )
+@app_commands.guild_only()
 async def recap(context: discord.Interaction, date: Optional[str]):
     if context.guild_id is None:
         await context.response.send_message(f"Available only on servers", ephemeral=True)
@@ -200,18 +232,16 @@ async def recap(context: discord.Interaction, date: Optional[str]):
     await context.response.send_message(embed=response, view=recapview)
 
 
-@tree.command(
-        name="recap_add",
+@recap_group.command(
+        name="add",
         description="Removes a given recap"
         )
 @app_commands.describe(
         text="Recap's content",
         date="Recap's date in YYYY-MM-DD format"
         )
+@app_commands.guild_only()
 async def recap_add(context: discord.Interaction, text: str, date: Optional[str]):
-    if context.guild_id is None:
-        await context.response.send_message(f"Available only on servers", ephemeral=True)
-        return
     if date is not None:
         try:
             date_new = datetime.date.fromisoformat(date)
@@ -226,27 +256,28 @@ async def recap_add(context: discord.Interaction, text: str, date: Optional[str]
         return
 
     try:
-        cursor = bot.db.cursor()
+        db = bot.db()
+        cursor = db.cursor()
         cursor.execute("INSERT INTO recaps(server_id, user_id, date, content) VALUE(%s, %s, %s, %s)", (context.guild_id, context.user.id, date_new.strftime('%Y-%m-%d'), text))
         cursor.close()
-        bot.db.commit()
+        db.commit()
+        db.close()
     except:
         await context.response.send_message(f"Something went wrong!", ephemeral=True)
 
     await context.response.send_message(f"Successfully added a new recap for date {date_new.strftime('%Y-%m-%d')}", ephemeral=True)
 
-@tree.command(
-        name="recap_remove",
+@recap_group.command(
+        name="remove",
         description="Removes a given recap"
         )
 @app_commands.describe(
         recap_id="Recap's id"
         )
+@app_commands.guild_only()
 async def recap_remove(context: discord.Interaction, recap_id: int):
-    if context.guild_id is None:
-        await context.response.send_message(f"Available only on servers", ephemeral=True)
-        return
-    cursor = bot.db.cursor()
+    db = bot.db()
+    cursor = db.cursor()
     cursor.execute("SELECT user_id from recaps where id = %s and server_id = %s", (recap_id,context.guild_id))
     recap = cursor.fetchone()
     if recap is None:
@@ -258,23 +289,22 @@ async def recap_remove(context: discord.Interaction, recap_id: int):
     try:
         cursor.execute("DELETE FROM recaps WHERE id = %s", (recap_id,))
         cursor.close()
-        bot.db.commit()
+        db.commit()
+        db.close()
     except:
         await context.response.send_message(f"Something went wrong!", ephemeral=True)
         return
     await context.response.send_message(f"Successfully removed recap with id {recap_id}", ephemeral=True)
 
 @tree.command(
-        name="recap_list",
+        name="list",
         description=f"Lists recaps from given user"
         )
 @app_commands.describe(
         target="Target user (self on empty)"
         )
+@app_commands.guild_only()
 async def recap_list(context: discord.Interaction, target: Optional[discord.Member]):
-    if context.guild_id is None:
-        await context.response.send_message(f"Available only on servers", ephemeral=True)
-        return
     if target is None:
         member = context.user
     else:
@@ -296,18 +326,18 @@ async def recap_list(context: discord.Interaction, target: Optional[discord.Memb
     recapview = views.ListView(response, context, recaps_list)
     await context.response.send_message(embed=response, view=recapview)
 
+tree.add_command(recap_group)
 
+# activity_group = GuildGroup(name='activity', description='Activity analytics commands!')
 
 @tree.command(
         name="hi",
         description=f"Says something from {owner_name}"
         )
+@app_commands.guild_only()
 async def hi(context: discord.Interaction, string: Optional[str]):
     if context.user.id != owner_id:
         await context.response.send_message(f"Only {owner_name} can use this command :(", ephemeral=True)
-        return
-    if not isinstance(context.user, discord.Member) or context.guild == None:
-        await context.response.send_message(content="Available only on servers!", ephemeral=True)
         return
     response = discord.Embed()
     test = await context.guild.fetch_member(owner_id)
